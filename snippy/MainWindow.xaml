@@ -116,6 +116,13 @@
                             </Canvas.Effect>
                         </Canvas>
 
+                        <!-- ラッキー残回数表示 -->
+                        <Canvas x:Name="pixelCanvasLucky" Width="40" Height="7" HorizontalAlignment="Center" Margin="0,2,0,0" Visibility="Hidden">
+                            <Canvas.Effect>
+                                <DropShadowEffect Color="#FFFF6464" BlurRadius="3" ShadowDepth="0"/>
+                            </Canvas.Effect>
+                        </Canvas>
+
                         <!-- Plant UI Container -->
                         <Canvas x:Name="pixelCanvasPlant" Width="30" Height="30" HorizontalAlignment="Center" Margin="0,5,0,0"/>
                     </StackPanel>

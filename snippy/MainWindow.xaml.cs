@@ -45,7 +45,9 @@ namespace snippy
             {'i', new int[] { 0,0,1,0,0, 0,0,0,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0 }},
             {'n', new int[] { 0,0,0,0,0, 0,0,0,0,0, 1,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1 }},
             {'t', new int[] { 0,0,1,0,0, 0,1,1,1,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,0,1,1 }},
-            {'s', new int[] { 0,0,0,0,0, 0,0,0,0,0, 0,1,1,1,1, 1,0,0,0,0, 0,1,1,1,0, 0,0,0,0,1, 1,1,1,1,0 }}
+            {'s', new int[] { 0,0,0,0,0, 0,0,0,0,0, 0,1,1,1,1, 1,0,0,0,0, 0,1,1,1,0, 0,0,0,0,1, 1,1,1,1,0 }},
+            {'L', new int[] { 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1 }},
+            {'K', new int[] { 1,0,0,0,1, 1,0,0,1,0, 1,0,1,0,0, 1,1,0,0,0, 1,0,1,0,0, 1,0,0,1,0, 1,0,0,0,1 }}
         };
 
         private double _lastKnobAngle = 0;
@@ -55,6 +57,10 @@ namespace snippy
         private int _slotDigit1 = 0;
         private int _slotDigit2 = 0;
         private int _slotDigit3 = 0;
+        private int _finalDigit1 = 0;
+        private int _finalDigit2 = 0;
+        private int _finalDigit3 = 0;
+        private int _spinSlowdownCounter = 0;
         private bool _isSpinningSlot = false;
         private DispatcherTimer _slotSpinTimer;
         private DateTime _slotSpinStartTime;
@@ -116,6 +122,7 @@ namespace snippy
                 LoadData(); // Load saved points and sticky notes
                 UpdatePointsDisplay();
                 UpdateSlotDisplay(); // Initial ラックチェック state
+                UpdateLuckyDisplay(); // Initial lucky counter
                 ApplyCustomizations(); // Apply loaded look
                 // ApplyPlantLevelChanges(); // Apply plant and effects on load (Temporarily disabled)
             };
@@ -153,101 +160,135 @@ namespace snippy
             {
                 _isSpinningSlot = true;
                 _slotSpinStartTime = DateTime.Now;
+                _spinSlowdownCounter = 0;
+                CalculateFinalOutcome();
                 _slotSpinTimer.Start();
             }
             else
             {
-                // Not enough points, reset accumulated angle to avoid infinite loop of trying
+                // Not enough points
                 _accumulatedKnobAngle = 0;
+                PlayInsufficientPointsAnimation();
+            }
+        }
+
+        private void CalculateFinalOutcome()
+        {
+            _totalSpinsCounter++;
+
+            _finalDigit1 = _random.Next(0, 10);
+            _finalDigit2 = _random.Next(0, 10);
+            _finalDigit3 = _random.Next(0, 10);
+
+            // 天井システム: 100回ごとに90%で揃う
+            if (_totalSpinsCounter % 100 == 0)
+            {
+                if (_random.NextDouble() < 0.90)
+                {
+                    _finalDigit1 = _random.Next(0, 10);
+                    _finalDigit2 = _finalDigit1;
+                    _finalDigit3 = _finalDigit1;
+                }
+            }
+            // ラッキーモード中: 30%で揃う
+            else if (_isLuckyMode)
+            {
+                if (_random.NextDouble() < 0.30)
+                {
+                    _finalDigit1 = _random.Next(0, 10);
+                    _finalDigit2 = _finalDigit1;
+                    _finalDigit3 = _finalDigit1;
+                }
             }
         }
 
         private void SlotSpinTimer_Tick(object sender, EventArgs e)
         {
-            // Randomize digits while spinning
-            _slotDigit1 = _random.Next(0, 10);
-            _slotDigit2 = _random.Next(0, 10);
-            _slotDigit3 = _random.Next(0, 10);
-            UpdateSlotDisplay(true);
+            double elapsed = (DateTime.Now - _slotSpinStartTime).TotalSeconds;
 
-            // Check if 2 seconds have passed
-            if ((DateTime.Now - _slotSpinStartTime).TotalSeconds >= 2.0)
+            if (elapsed < 0.7)
             {
+                // Phase 1: 全桁高速スピン
+                _slotDigit1 = _random.Next(0, 10);
+                _slotDigit2 = _random.Next(0, 10);
+                _slotDigit3 = _random.Next(0, 10);
+            }
+            else if (elapsed < 1.2)
+            {
+                // Phase 2: 1桁目ロック、2・3桁目スピン
+                _slotDigit1 = _finalDigit1;
+                _slotDigit2 = _random.Next(0, 10);
+                _slotDigit3 = _random.Next(0, 10);
+            }
+            else if (elapsed < 1.65)
+            {
+                // Phase 3: 1・2桁目ロック、3桁目スピン
+                _slotDigit1 = _finalDigit1;
+                _slotDigit2 = _finalDigit2;
+                _slotDigit3 = _random.Next(0, 10);
+            }
+            else if (elapsed < 2.1)
+            {
+                // Phase 4: 3桁目スローダウン (徐々に間引く)
+                _slotDigit1 = _finalDigit1;
+                _slotDigit2 = _finalDigit2;
+                double phaseProgress = (elapsed - 1.65) / 0.45; // 0→1
+                int skipRate = (int)(phaseProgress * 5) + 1;     // 1→6
+                _spinSlowdownCounter++;
+                if (_spinSlowdownCounter >= skipRate)
+                {
+                    _slotDigit3 = _random.Next(0, 10);
+                    _spinSlowdownCounter = 0;
+                }
+            }
+            else
+            {
+                // Phase 5: 全桁停止 → 結果処理
+                _slotDigit1 = _finalDigit1;
+                _slotDigit2 = _finalDigit2;
+                _slotDigit3 = _finalDigit3;
                 _slotSpinTimer.Stop();
                 FinishSlotSpin();
+                return;
             }
+
+            UpdateSlotDisplay(true);
         }
 
         private void FinishSlotSpin()
         {
             int cost = 10;
-            _totalSpinsCounter++; // 回数をカウントアップ
-            
-            // Finalize ラックチェック numbers
-            _slotDigit1 = _random.Next(0, 10);
-            _slotDigit2 = _random.Next(0, 10);
-            _slotDigit3 = _random.Next(0, 10);
-
-            // 100回転ごとの高確率（天井）システム（例: 90%で揃う）
-            if (_totalSpinsCounter > 0 && _totalSpinsCounter % 100 == 0)
-            {
-                if (_random.NextDouble() < 0.90) // 90% chance
-                {
-                    _slotDigit1 = _random.Next(0, 10);
-                    _slotDigit2 = _slotDigit1;
-                    _slotDigit3 = _slotDigit1;
-                }
-            }
-            // 幸運中の場合は高確率で当たりにする
-            else if (_isLuckyMode)
-            {
-                // 例えば30%の確率で強制的に揃える
-                if (_random.NextDouble() < 0.30)
-                {
-                    _slotDigit1 = _random.Next(0, 10);
-                    _slotDigit2 = _slotDigit1;
-                    _slotDigit3 = _slotDigit1;
-                }
-            }
-
-            bool isWin = false;
             int bonus = 0;
+            bool isWin = false;
+            bool isHalfWin = false;
 
-            // Check ラックチェック win condition
-            if (_slotDigit1 == _slotDigit2 && _slotDigit2 == _slotDigit3)
+            // Check ラックチェック win condition (3桁一致)
+            if (_finalDigit1 == _finalDigit2 && _finalDigit2 == _finalDigit3)
             {
                 isWin = true;
-                if (_slotDigit1 == 7)
-                {
-                    // Jackpot 777: No cost, big bonus
-                    cost = 0;
-                    bonus = 100;
-                }
-                else
-                {
-                    // Other matched digits: No cost, small bonus
-                    cost = 0;
-                    bonus = 20;
-                }
+                cost = 0;
+                bonus = _finalDigit1 == 7 ? 100 : 20;
 
-                // 幸運中の突入判定（通常時に当たりが出たら突入）
+                // ラッキーモード突入（通常時のみ）
                 if (!_isLuckyMode)
                 {
                     _isLuckyMode = true;
                     _luckyRemainingSpins = 10;
                 }
-                // （幸運中に当たりが出ても _luckyRemainingSpins は増えない）
+            }
+            // 2桁一致: ハーフウィン（コストなし、ボーナスなし）
+            else if (_finalDigit1 == _finalDigit2 || _finalDigit2 == _finalDigit3 || _finalDigit1 == _finalDigit3)
+            {
+                isHalfWin = true;
+                cost = 0;
             }
 
-            // 幸運中なら残り回数を減らす
-            if (_isLuckyMode && !isWin || (_isLuckyMode && isWin && _luckyRemainingSpins > 0))
+            // ラッキーモード残回数カウントダウン
+            if (_isLuckyMode)
             {
                 _luckyRemainingSpins--;
-                
-                // 10回終了時の継続判定
                 if (_luckyRemainingSpins <= 0)
                 {
-                    // 一定確率（例: 30%）でさらに10回延長
                     if (_random.NextDouble() < 0.30)
                     {
                         _luckyRemainingSpins = 10; // 継続
@@ -261,20 +302,20 @@ namespace snippy
             }
 
             _points -= cost;
-            if (bonus > 0)
-            {
-                AddPoints(bonus);
-            }
-            
+            if (bonus > 0) AddPoints(bonus);
+
             UpdatePointsDisplay();
-            UpdateSlotDisplay(false, isWin); // Fixed state
+            UpdateSlotDisplay(false, isWin, isHalfWin);
+            UpdateLuckyDisplay();
 
             _plantLevel++;
-            
-            if (isWin)
-            {
+
+            if (isWin && _finalDigit1 == 7)
+                PlayJackpotAnimation();
+            else if (isWin)
                 PlayWinAnimation();
-            }
+            else if (isHalfWin)
+                PlayHalfWinAnimation();
             else
             {
                 ApplyRandomMinorChange();
@@ -282,30 +323,136 @@ namespace snippy
             }
 
             SaveData();
-
-            // Unlock knob
             _isSpinningSlot = false;
         }
 
-        private void UpdateSlotDisplay(bool isSpinning = false, bool isWin = false)
+        private void UpdateSlotDisplay(bool isSpinning = false, bool isWin = false, bool isHalfWin = false)
         {
             if (pixelCanvasSlot != null)
             {
                 string slotText = $"{_slotDigit1} {_slotDigit2} {_slotDigit3}";
                 Color color = Colors.White;
-                
+
                 if (!isSpinning)
                 {
-                    color = isWin ? Colors.Gold : Color.FromArgb(255, 200, 200, 200);
+                    if (isWin)           color = Colors.Gold;
+                    else if (isHalfWin)  color = Color.FromArgb(255, 255, 165, 0); // オレンジ
+                    else                 color = Color.FromArgb(255, 200, 200, 200);
                 }
 
                 DrawPixelText(pixelCanvasSlot, slotText, 1, new SolidColorBrush(color));
 
                 if (pixelCanvasSlot.Effect is DropShadowEffect shadow)
                 {
-                    shadow.Color = isWin ? Colors.Gold : Colors.White;
+                    if (isWin)          shadow.Color = Colors.Gold;
+                    else if (isHalfWin) shadow.Color = Color.FromArgb(255, 255, 165, 0);
+                    else                shadow.Color = Colors.White;
                 }
             }
+        }
+
+        private void UpdateLuckyDisplay()
+        {
+            if (pixelCanvasLucky == null) return;
+            if (_isLuckyMode)
+            {
+                DrawPixelText(pixelCanvasLucky, $"L:{_luckyRemainingSpins}", 1,
+                    new SolidColorBrush(Color.FromArgb(255, 255, 100, 100)));
+                pixelCanvasLucky.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                pixelCanvasLucky.Children.Clear();
+                pixelCanvasLucky.Visibility = Visibility.Hidden;
+            }
+        }
+
+        private void PlayInsufficientPointsAnimation()
+        {
+            // ポイント不足: 赤フラッシュのみ
+            try
+            {
+                var flashAnim = (Storyboard)this.Resources["FlashAnim"];
+                if (flashAnim != null && FlashOverlay != null)
+                {
+                    FlashOverlay.Fill = Brushes.Red;
+                    flashAnim.Begin();
+                    var reset = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                    reset.Tick += (s, e) => { FlashOverlay.Fill = Brushes.White; reset.Stop(); };
+                    reset.Start();
+                }
+            }
+            catch { }
+        }
+
+        private void PlayHalfWinAnimation()
+        {
+            // 2桁一致: オレンジフラッシュ
+            try
+            {
+                var flashAnim = (Storyboard)this.Resources["FlashAnim"];
+                if (flashAnim != null && FlashOverlay != null)
+                {
+                    FlashOverlay.Fill = new SolidColorBrush(Color.FromArgb(255, 255, 165, 0));
+                    flashAnim.Begin();
+                    var reset = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                    reset.Tick += (s, e) => { FlashOverlay.Fill = Brushes.White; reset.Stop(); };
+                    reset.Start();
+                }
+            }
+            catch { }
+        }
+
+        private void PlayJackpotAnimation()
+        {
+            // 777ジャックポット: 大きいスケール + 複数シェイク + 画面背景ゴールド
+            try
+            {
+                var flashAnim = (Storyboard)this.Resources["FlashAnim"];
+                if (flashAnim != null && FlashOverlay != null)
+                {
+                    FlashOverlay.Fill = Brushes.Gold;
+                    flashAnim.Begin();
+                    var reset = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                    reset.Tick += (s, e) => { FlashOverlay.Fill = Brushes.White; reset.Stop(); };
+                    reset.Start();
+                }
+
+                var shakeAnim = (Storyboard)this.Resources["ShakeAnim"];
+                shakeAnim?.Begin();
+                var shake2 = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+                shake2.Tick += (s, e) => { shakeAnim?.Begin(); shake2.Stop(); };
+                shake2.Start();
+                var shake3 = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+                shake3.Tick += (s, e) => { shakeAnim?.Begin(); shake3.Stop(); };
+                shake3.Start();
+
+                if (pixelCanvasSlot != null)
+                {
+                    var st = new ScaleTransform(1, 1);
+                    pixelCanvasSlot.RenderTransform = st;
+                    pixelCanvasSlot.RenderTransformOrigin = new Point(0.5, 0.5);
+                    var animX = new DoubleAnimation(1, 2.5, TimeSpan.FromMilliseconds(150)) { AutoReverse = true, RepeatBehavior = new RepeatBehavior(5) };
+                    var animY = new DoubleAnimation(1, 2.5, TimeSpan.FromMilliseconds(150)) { AutoReverse = true, RepeatBehavior = new RepeatBehavior(5) };
+                    st.BeginAnimation(ScaleTransform.ScaleXProperty, animX);
+                    st.BeginAnimation(ScaleTransform.ScaleYProperty, animY);
+                }
+
+                // 画面背景をゴールドに一時変更
+                if (ScreenGrid != null)
+                {
+                    var origColor = _screenGridColor;
+                    ScreenGrid.Background = new SolidColorBrush(Color.FromArgb(255, 160, 130, 0));
+                    var bgTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+                    bgTimer.Tick += (s, e) =>
+                    {
+                        ScreenGrid.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(origColor));
+                        bgTimer.Stop();
+                    };
+                    bgTimer.Start();
+                }
+            }
+            catch { }
         }
 
         private void PlayLuckyContinueAnimation()
