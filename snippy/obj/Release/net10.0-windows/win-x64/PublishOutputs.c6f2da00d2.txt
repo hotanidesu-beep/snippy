@@ -1,0 +1,2 @@
+C:\project\snippy\snippy\bin\Release\net10.0-windows\win-x64\publish\snippy.pdb
+C:\project\snippy\snippy\bin\Release\net10.0-windows\win-x64\publish\snippy.exe

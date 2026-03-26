@@ -1,0 +1,52 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\project\\snippy\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{21741DB7-DB35-51A6-88D2-C2EB63820181}|snippy\\snippy.csproj|c:\\project\\snippy\\snippy\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{21741DB7-DB35-51A6-88D2-C2EB63820181}|snippy\\snippy.csproj|solutionrelative:snippy\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{21741DB7-DB35-51A6-88D2-C2EB63820181}|snippy\\snippy.csproj|c:\\project\\snippy\\snippy\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{21741DB7-DB35-51A6-88D2-C2EB63820181}|snippy\\snippy.csproj|solutionrelative:snippy\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainWindow.xaml",
+              "DocumentMoniker": "C:\\project\\snippy\\snippy\\MainWindow.xaml",
+              "RelativeDocumentMoniker": "snippy\\MainWindow.xaml",
+              "ToolTip": "C:\\project\\snippy\\snippy\\MainWindow.xaml",
+              "RelativeToolTip": "snippy\\MainWindow.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2026-03-05T00:14:31.258Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "MainWindow.xaml.cs",
+              "DocumentMoniker": "C:\\project\\snippy\\snippy\\MainWindow.xaml.cs",
+              "RelativeDocumentMoniker": "snippy\\MainWindow.xaml.cs",
+              "ToolTip": "C:\\project\\snippy\\snippy\\MainWindow.xaml.cs",
+              "RelativeToolTip": "snippy\\MainWindow.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-05T00:14:30.266Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
