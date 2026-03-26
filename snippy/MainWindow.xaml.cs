@@ -51,7 +51,7 @@ namespace snippy
         private double _lastKnobAngle = 0;
         private double _accumulatedKnobAngle = 0;
         
-        // Slot Machine State
+        // ラックチェック State
         private int _slotDigit1 = 0;
         private int _slotDigit2 = 0;
         private int _slotDigit3 = 0;
@@ -83,7 +83,7 @@ namespace snippy
         {
             InitializeComponent();
             
-            // Set up slot spin timer
+            // Set up ラックチェック timer
             _slotSpinTimer = new DispatcherTimer();
             _slotSpinTimer.Interval = TimeSpan.FromMilliseconds(50); // fast update for "spinning" effect
             _slotSpinTimer.Tick += SlotSpinTimer_Tick;
@@ -115,7 +115,7 @@ namespace snippy
                 anim.Begin();
                 LoadData(); // Load saved points and sticky notes
                 UpdatePointsDisplay();
-                UpdateSlotDisplay(); // Initial slot state
+                UpdateSlotDisplay(); // Initial ラックチェック state
                 ApplyCustomizations(); // Apply loaded look
                 // ApplyPlantLevelChanges(); // Apply plant and effects on load (Temporarily disabled)
             };
@@ -125,7 +125,7 @@ namespace snippy
         {
             if (_isSpinningSlot)
             {
-                // Ignore knob while slot is spinning
+                // Ignore knob while ラックチェック is spinning
                 _lastKnobAngle = newAngle;
                 return;
             }
@@ -183,7 +183,7 @@ namespace snippy
             int cost = 10;
             _totalSpinsCounter++; // 回数をカウントアップ
             
-            // Finalize slot numbers
+            // Finalize ラックチェック numbers
             _slotDigit1 = _random.Next(0, 10);
             _slotDigit2 = _random.Next(0, 10);
             _slotDigit3 = _random.Next(0, 10);
@@ -213,7 +213,7 @@ namespace snippy
             bool isWin = false;
             int bonus = 0;
 
-            // Check slot win condition
+            // Check ラックチェック win condition
             if (_slotDigit1 == _slotDigit2 && _slotDigit2 == _slotDigit3)
             {
                 isWin = true;
