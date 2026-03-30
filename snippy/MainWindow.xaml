@@ -123,9 +123,22 @@
                             </Canvas.Effect>
                         </Canvas>
 
-                        <!-- Plant UI Container -->
-                        <Canvas x:Name="pixelCanvasPlant" Width="30" Height="30" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                        <!-- コンボ表示 -->
+                        <Canvas x:Name="pixelCanvasCombo" Width="40" Height="7" HorizontalAlignment="Center" Margin="0,1,0,0" Visibility="Hidden">
+                            <Canvas.Effect>
+                                <DropShadowEffect Color="#FFFF9600" BlurRadius="3" ShadowDepth="0"/>
+                            </Canvas.Effect>
+                        </Canvas>
+
+                        <!-- スキル状態表示 -->
+                        <Canvas x:Name="pixelCanvasSkill" Width="50" Height="7" HorizontalAlignment="Center" Margin="0,1,0,0" Visibility="Hidden"/>
+
+                        <!-- スライムキャラ -->
+                        <Canvas x:Name="pixelCanvasSlime" Width="35" Height="35" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                     </StackPanel>
+
+                    <!-- レリック表示 (画面上部左) -->
+                    <Canvas x:Name="pixelCanvasRelics" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="2,2,0,0" Height="5" Width="60"/>
 
                     <!-- Points UI (Bottom Right) -->
                     <Canvas x:Name="pixelCanvasPoints" Width="40" Height="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,5,5"/>
