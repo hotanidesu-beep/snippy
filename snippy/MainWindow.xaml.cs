@@ -47,7 +47,12 @@ namespace snippy
             {'t', new int[] { 0,0,1,0,0, 0,1,1,1,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,0,1,1 }},
             {'s', new int[] { 0,0,0,0,0, 0,0,0,0,0, 0,1,1,1,1, 1,0,0,0,0, 0,1,1,1,0, 0,0,0,0,1, 1,1,1,1,0 }},
             {'L', new int[] { 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1 }},
-            {'K', new int[] { 1,0,0,0,1, 1,0,0,1,0, 1,0,1,0,0, 1,1,0,0,0, 1,0,1,0,0, 1,0,0,1,0, 1,0,0,0,1 }}
+            {'K', new int[] { 1,0,0,0,1, 1,0,0,1,0, 1,0,1,0,0, 1,1,0,0,0, 1,0,1,0,0, 1,0,0,1,0, 1,0,0,0,1 }},
+            {'C', new int[] { 0,1,1,1,1, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 0,1,1,1,1 }},
+            {'G', new int[] { 0,1,1,1,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,1,1,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,1,1,0 }},
+            {'S', new int[] { 0,1,1,1,1, 1,0,0,0,0, 1,0,0,0,0, 0,1,1,1,0, 0,0,0,0,1, 0,0,0,0,1, 1,1,1,1,0 }},
+            {'*', new int[] { 0,0,0,0,0, 1,0,1,0,1, 0,1,1,1,0, 0,0,1,0,0, 0,1,1,1,0, 1,0,1,0,1, 0,0,0,0,0 }},
+            {'x', new int[] { 0,0,0,0,0, 0,0,0,0,0, 1,0,0,0,1, 0,1,0,1,0, 0,0,1,0,0, 0,1,0,1,0, 1,0,0,0,1 }}
         };
 
         private double _lastKnobAngle = 0;
@@ -83,7 +88,36 @@ namespace snippy
         private string _screenGridColor = "#FF0D3A20";
         private double _tvOuterRadius = 8.0;
         private double _tvInnerRadius = 8.0;
-        private int _plantLevel = 0;
+
+        // Slime Creature System
+        private int _slimeLevel = 0;
+        private string _slimeMood = "neutral"; // neutral, happy, jackpot, sad
+        private DispatcherTimer _slimeMoodTimer;
+        private DispatcherTimer _slimeIdleTimer;
+
+        // ═══ Roguelike System ═══
+        // Combo streak
+        private int _comboStreak = 0;
+        // Relics
+        private List<string> _ownedRelics = new List<string>();
+        private int _totalWinCount = 0;
+        private static readonly string[] ALL_RELICS = new[]
+        {
+            "GOLDEN_FINGER",  // 勝利ボーナス+50%
+            "LUCKY_CHARM",    // ラッキーモード確率+10%
+            "THRIFTY_WALLET", // スピンコスト-2
+            "DIVINE_FAVOR",   // 天井75回
+            "CHAIN_PROOF",    // コンボ倍率+50%
+            "MAGIC_DICE",     // 10%でスピン無料
+            "DOUBLE_UP",      // 15%でボーナス2倍
+            "PITY_GUARD",     // 0pt時15pt復活
+        };
+        // Skills
+        private bool _skillGuardActive = false;  // 次スピン無料
+        private bool _skillSurgeActive = false;  // 次の勝利2倍
+        // Spin modifiers
+        private int _currentSpinCost = 10;
+        private string _pendingSpinEvent = null; // "blessed" or "cursed"
 
         public MainWindow()
         {
@@ -119,13 +153,18 @@ namespace snippy
             this.Loaded += (s, e) => {
                 var anim = (Storyboard)this.Resources["ScanlineAnim"];
                 anim.Begin();
-                LoadData(); // Load saved points and sticky notes
+                LoadData();
                 UpdatePointsDisplay();
-                UpdateSlotDisplay(); // Initial ラックチェック state
-                UpdateLuckyDisplay(); // Initial lucky counter
-                ApplyCustomizations(); // Apply loaded look
-                ApplyPlantLevelChanges(); // Apply plant and effects on load
-                StartTodoButtonPulse(); // Pulsing todo button
+                UpdateSlotDisplay();
+                UpdateLuckyDisplay();
+                UpdateComboDisplay();
+                UpdateSkillDisplay();
+                UpdateRelicDisplay();
+                ApplyCustomizations();
+                UpdateSlimeDisplay();
+                StartTodoButtonPulse();
+                StartSlimeIdleAnimation();
+                SetupSkillContextMenu();
             };
         }
 
@@ -157,7 +196,38 @@ namespace snippy
 
         private void StartSlotSpin()
         {
-            if (_points >= 10)
+            // 今スピンのコスト計算（レリック・スキルで変動）
+            _currentSpinCost = 10;
+            if (_ownedRelics.Contains("THRIFTY_WALLET"))
+                _currentSpinCost = Math.Max(5, _currentSpinCost - 2);
+            if (_skillGuardActive)
+            {
+                _currentSpinCost = 0;
+                _skillGuardActive = false;
+                UpdateSkillDisplay();
+            }
+            else if (_ownedRelics.Contains("MAGIC_DICE") && _random.NextDouble() < 0.10)
+            {
+                _currentSpinCost = 0;
+                ShowEventNotification("✦ 魔法のサイコロ発動！\n無料スピン！");
+            }
+
+            // ランダムスピンイベント（6%）
+            if (_pendingSpinEvent == null && _random.NextDouble() < 0.06)
+            {
+                _pendingSpinEvent = _random.NextDouble() < 0.5 ? "blessed" : "cursed";
+                if (_pendingSpinEvent == "blessed")
+                {
+                    _currentSpinCost = 0;
+                    ShowEventNotification("★ 祝福のスピン！\n無料で回せる！");
+                }
+                else
+                {
+                    ShowEventNotification("☠ 呪いのスピン...\n勝てば+75%ボーナス！");
+                }
+            }
+
+            if (_points >= _currentSpinCost)
             {
                 _isSpinningSlot = true;
                 _slotSpinStartTime = DateTime.Now;
@@ -167,7 +237,6 @@ namespace snippy
             }
             else
             {
-                // Not enough points
                 _accumulatedKnobAngle = 0;
                 PlayInsufficientPointsAnimation();
             }
@@ -181,27 +250,39 @@ namespace snippy
             _finalDigit2 = _random.Next(0, 10);
             _finalDigit3 = _random.Next(0, 10);
 
-            // 天井システム: 100回ごとに90%で揃う
-            if (_totalSpinsCounter % 100 == 0)
+            // ワイルドシンボル★（-1）: 5勝以降、各スロット4%で出現
+            if (_totalWinCount >= 5)
+            {
+                if (_random.NextDouble() < 0.04) _finalDigit1 = -1;
+                if (_random.NextDouble() < 0.04) _finalDigit2 = -1;
+                if (_random.NextDouble() < 0.04) _finalDigit3 = -1;
+            }
+
+            // 天井システム: DIVINE_FAVORがあれば75回、なければ100回
+            int ceiling = _ownedRelics.Contains("DIVINE_FAVOR") ? 75 : 100;
+            if (_totalSpinsCounter % ceiling == 0)
             {
                 if (_random.NextDouble() < 0.90)
                 {
-                    _finalDigit1 = _random.Next(0, 10);
-                    _finalDigit2 = _finalDigit1;
-                    _finalDigit3 = _finalDigit1;
+                    int d = _random.Next(0, 10);
+                    _finalDigit1 = _finalDigit2 = _finalDigit3 = d;
                 }
             }
-            // ラッキーモード中: 30%で揃う
+            // ラッキーモード中: LUCKY_CHARMで+10%
             else if (_isLuckyMode)
             {
-                if (_random.NextDouble() < 0.30)
+                double luckyChance = _ownedRelics.Contains("LUCKY_CHARM") ? 0.40 : 0.30;
+                if (_random.NextDouble() < luckyChance)
                 {
-                    _finalDigit1 = _random.Next(0, 10);
-                    _finalDigit2 = _finalDigit1;
-                    _finalDigit3 = _finalDigit1;
+                    int d = _random.Next(0, 10);
+                    _finalDigit1 = _finalDigit2 = _finalDigit3 = d;
                 }
             }
         }
+
+        // ワイルド（-1）は任意の数字に一致
+        private static bool SlotMatches(int a, int b) => a == -1 || b == -1 || a == b;
+        private static char SlotChar(int d) => d == -1 ? '*' : (char)('0' + d);
 
         private void SlotSpinTimer_Tick(object sender, EventArgs e)
         {
@@ -258,30 +339,84 @@ namespace snippy
 
         private void FinishSlotSpin()
         {
-            int cost = 10;
+            int cost = _currentSpinCost;
             int bonus = 0;
             bool isWin = false;
             bool isHalfWin = false;
 
-            // Check ラックチェック win condition (3桁一致)
-            if (_finalDigit1 == _finalDigit2 && _finalDigit2 == _finalDigit3)
+            // ワイルド対応の勝利判定
+            bool allMatch = SlotMatches(_finalDigit1, _finalDigit2)
+                         && SlotMatches(_finalDigit2, _finalDigit3)
+                         && SlotMatches(_finalDigit1, _finalDigit3);
+            bool twoMatch = !allMatch && (SlotMatches(_finalDigit1, _finalDigit2)
+                                       || SlotMatches(_finalDigit2, _finalDigit3)
+                                       || SlotMatches(_finalDigit1, _finalDigit3));
+
+            // ジャックポット判定用の実際の数字（ワイルド除く）
+            int effectiveDigit = _finalDigit1 != -1 ? _finalDigit1
+                               : _finalDigit2 != -1 ? _finalDigit2 : _finalDigit3;
+            bool isJackpot = allMatch && effectiveDigit == 7;
+
+            if (allMatch)
             {
                 isWin = true;
                 cost = 0;
-                bonus = _finalDigit1 == 7 ? 100 : 20;
+                bonus = isJackpot ? 100 : 20;
 
-                // ラッキーモード突入（通常時のみ）
+                // レリック: GOLDEN_FINGER - ボーナス+50%
+                if (_ownedRelics.Contains("GOLDEN_FINGER"))
+                    bonus = (int)(bonus * 1.5);
+                // レリック: DOUBLE_UP - 15%でボーナス2倍
+                if (_ownedRelics.Contains("DOUBLE_UP") && _random.NextDouble() < 0.15)
+                {
+                    bonus *= 2;
+                    ShowEventNotification("✦ ダブルアップ発動！\nボーナス2倍！");
+                }
+                // スキル: SURGE - 2倍
+                if (_skillSurgeActive)
+                {
+                    bonus *= 2;
+                    _skillSurgeActive = false;
+                    UpdateSkillDisplay();
+                    ShowEventNotification("⚡ 倍増発動！\nボーナス2倍！");
+                }
+                // イベント: 呪いスピン - 勝利ボーナス+75%
+                if (_pendingSpinEvent == "cursed")
+                    bonus = (int)(bonus * 1.75);
+                _pendingSpinEvent = null;
+
+                // コンボ乗数
+                _comboStreak++;
+                double comboMult = GetComboMultiplier();
+                if (_ownedRelics.Contains("CHAIN_PROOF"))
+                    comboMult = 1.0 + (comboMult - 1.0) * 1.5;
+                bonus = (int)(bonus * comboMult);
+                if (_comboStreak >= 2)
+                    ShowEventNotification($"🔥 コンボ x{_comboStreak}！\nボーナス x{comboMult:0.0}");
+
+                _totalWinCount++;
                 if (!_isLuckyMode)
                 {
                     _isLuckyMode = true;
                     _luckyRemainingSpins = 10;
                 }
+                _slimeMood = isJackpot ? "jackpot" : "happy";
+                SetSlimeMoodTimer(isJackpot ? 3000 : 2000);
             }
-            // 2桁一致: ハーフウィン（コストなし、ボーナスなし）
-            else if (_finalDigit1 == _finalDigit2 || _finalDigit2 == _finalDigit3 || _finalDigit1 == _finalDigit3)
+            else if (twoMatch)
             {
                 isHalfWin = true;
                 cost = 0;
+                _comboStreak = 0;
+                _pendingSpinEvent = null;
+                _slimeMood = "neutral";
+            }
+            else
+            {
+                _comboStreak = 0;
+                _pendingSpinEvent = null;
+                _slimeMood = "sad";
+                SetSlimeMoodTimer(1500);
             }
 
             // ラッキーモード残回数カウントダウン
@@ -292,27 +427,40 @@ namespace snippy
                 {
                     if (_random.NextDouble() < 0.30)
                     {
-                        _luckyRemainingSpins = 10; // 継続
+                        _luckyRemainingSpins = 10;
                         PlayLuckyContinueAnimation();
                     }
                     else
                     {
-                        _isLuckyMode = false; // 終了
+                        _isLuckyMode = false;
                     }
                 }
             }
 
             _points -= cost;
+
+            // レリック: PITY_GUARD - 0pt以下なら15ptで復活
+            if (_points <= 0 && _ownedRelics.Contains("PITY_GUARD"))
+            {
+                _points = 15;
+                ShowEventNotification("🛡 加護の盾発動！\n15pt復活！");
+            }
+
             if (bonus > 0) AddPoints(bonus);
 
             UpdatePointsDisplay();
             UpdateSlotDisplay(false, isWin, isHalfWin);
             UpdateLuckyDisplay();
+            UpdateComboDisplay();
 
-            _plantLevel++;
-            ApplyPlantLevelChanges();
+            _slimeLevel++;
+            UpdateSlimeDisplay();
 
-            if (isWin && _finalDigit1 == 7)
+            // 5勝ごとにレリック付与
+            if (isWin && _totalWinCount > 0 && _totalWinCount % 5 == 0)
+                GrantRandomRelic();
+
+            if (isJackpot)
                 PlayJackpotAnimation();
             else if (isWin)
                 PlayWinAnimation();
@@ -332,7 +480,7 @@ namespace snippy
         {
             if (pixelCanvasSlot != null)
             {
-                string slotText = $"{_slotDigit1} {_slotDigit2} {_slotDigit3}";
+                string slotText = $"{SlotChar(_slotDigit1)} {SlotChar(_slotDigit2)} {SlotChar(_slotDigit3)}";
                 Color color = Colors.White;
 
                 if (!isSpinning)
@@ -591,67 +739,236 @@ namespace snippy
             catch { }
         }
 
-        private void ApplyPlantLevelChanges()
+        // ─── スライムシステム ─────────────────────────────────
+        private void UpdateSlimeDisplay()
         {
-            UpdatePlantDisplay();
+            if (pixelCanvasSlime == null) return;
+            DrawSlimePixelArt(_slimeLevel, _slimeMood);
             GenerateParticles();
         }
 
-        private void UpdatePlantDisplay()
+        private void DrawSlimePixelArt(int level, string mood)
         {
-            if (pixelCanvasPlant != null)
-            {
-                DrawPlantPixelArt(_plantLevel);
-            }
-        }
+            if (pixelCanvasSlime == null) return;
+            pixelCanvasSlime.Children.Clear();
 
-        private void DrawPlantPixelArt(int level)
-        {
-            pixelCanvasPlant.Children.Clear();
-            
-            int height = Math.Min(5 + (level * 2), 30); // Max height
-            
-            // Stem
-            Rectangle stem = new Rectangle
+            // ステージ: レベルに応じて5段階
+            int stage = level < 3 ? 0 : level < 10 ? 1 : level < 20 ? 2 : level < 35 ? 3 : 4;
+
+            double cw = pixelCanvasSlime.Width > 0 ? pixelCanvasSlime.Width : 35;
+            double ch = pixelCanvasSlime.Height > 0 ? pixelCanvasSlime.Height : 35;
+            double cx = cw / 2.0;
+
+            // ボディサイズ（ステージで成長）
+            double bw = 10 + stage * 5;
+            double bh = 8 + stage * 3.5;
+
+            // 気分・ステージで色変化
+            Color bodyColor = mood switch
             {
-                Width = 2,
-                Height = height,
-                Fill = new SolidColorBrush(Color.FromArgb(255, 34, 139, 34)) // ForestGreen
+                "happy"   => Color.FromArgb(255, 255, 215,  0),
+                "jackpot" => Color.FromArgb(255, 255, 100, 50),
+                "sad"     => Color.FromArgb(255, 140,  80, 200),
+                _ => stage switch
+                {
+                    0 => Color.FromArgb(255,  80, 160, 220),   // ベビー：水色
+                    1 => Color.FromArgb(255,  70, 200, 120),   // スライム：緑
+                    2 => Color.FromArgb(255,  60, 130, 230),   // 成長：青
+                    3 => Color.FromArgb(255, 240, 120,  40),   // 進化：オレンジ
+                    _ => Color.FromArgb(255, 230,  60, 150)    // キング：ピンク
+                }
             };
-            Canvas.SetLeft(stem, pixelCanvasPlant.Width / 2 - 1);
-            Canvas.SetBottom(stem, 0);
-            pixelCanvasPlant.Children.Add(stem);
+            Color shadowColor = Color.FromArgb(160,
+                (byte)(bodyColor.R * 0.55), (byte)(bodyColor.G * 0.55), (byte)(bodyColor.B * 0.55));
 
-            // Leaves
-            int leafCount = Math.Min(level, 8);
-            for(int i = 0; i < leafCount; i++)
+            // 王冠（ステージ3以上）
+            if (stage >= 3)
             {
-                Rectangle leaf = new Rectangle
+                double crownW = bw * 0.75;
+                double crownTop = ch - bh - bh * 0.6 - 6;
+                var crownBase = new Rectangle { Width = crownW, Height = 3,
+                    Fill = new SolidColorBrush(Colors.Gold) };
+                Canvas.SetLeft(crownBase, cx - crownW / 2);
+                Canvas.SetTop(crownBase, crownTop + 3);
+                pixelCanvasSlime.Children.Add(crownBase);
+                for (int i = 0; i < 3; i++)
                 {
-                    Width = 4 + (level/3.0),
-                    Height = 2 + (level/5.0),
-                    Fill = new SolidColorBrush(Color.FromArgb(255, 50, 205, 50)) // LimeGreen
-                };
-                Canvas.SetLeft(leaf, (pixelCanvasPlant.Width / 2) + (i % 2 == 0 ? 1 : - (4 + (level/3.0))));
-                Canvas.SetBottom(leaf, 5 + (i * 4));
-                pixelCanvasPlant.Children.Add(leaf);
-            }
-            
-            // If level is high, add some "fruits" or flowers
-            if (level >= 5)
-            {
-                int fruitCount = (level - 4);
-                for(int i = 0; i < fruitCount; i++)
-                {
-                    Ellipse fruit = new Ellipse
-                    {
-                        Width = 4, Height = 4, Fill = Brushes.DeepPink
-                    };
-                    Canvas.SetLeft(fruit, (pixelCanvasPlant.Width / 2) + _random.Next(-10, 10));
-                    Canvas.SetBottom(fruit, height - _random.Next(2, 15));
-                    pixelCanvasPlant.Children.Add(fruit);
+                    var pt = new Rectangle { Width = 3, Height = 4,
+                        Fill = new SolidColorBrush(stage >= 4 ? Colors.Gold : Colors.Goldenrod) };
+                    Canvas.SetLeft(pt, cx - crownW / 2 + i * crownW / 2.5 + 1);
+                    Canvas.SetTop(pt, crownTop);
+                    pixelCanvasSlime.Children.Add(pt);
                 }
             }
+
+            // 上のコブ（ぷよっとした頭）
+            double bumpW = bw * 0.55;
+            double bumpH = bh * 0.65;
+            double bodyTop = ch - bh - 2;
+            var bump = new Ellipse { Width = bumpW, Height = bumpH,
+                Fill = new SolidColorBrush(bodyColor) };
+            Canvas.SetLeft(bump, cx - bumpW / 2);
+            Canvas.SetTop(bump, bodyTop - bumpH * 0.65);
+            pixelCanvasSlime.Children.Add(bump);
+
+            // メインボディ
+            var body = new Ellipse { Width = bw, Height = bh,
+                Fill = new SolidColorBrush(bodyColor) };
+            Canvas.SetLeft(body, cx - bw / 2);
+            Canvas.SetTop(body, bodyTop);
+            pixelCanvasSlime.Children.Add(body);
+
+            // 影（底の楕円）
+            var shadow = new Ellipse { Width = bw * 0.7, Height = bh * 0.22,
+                Fill = new SolidColorBrush(shadowColor) };
+            Canvas.SetLeft(shadow, cx - bw * 0.35);
+            Canvas.SetTop(shadow, bodyTop + bh * 0.8);
+            pixelCanvasSlime.Children.Add(shadow);
+
+            // 目の位置
+            double eyeSz = stage >= 2 ? 2.5 : 2.0;
+            double eyeY  = bodyTop + bh * 0.28;
+            double eyeGap = bw * 0.22;
+
+            // ステージ2以上：目の白
+            if (stage >= 2)
+            {
+                var lw = new Ellipse { Width = eyeSz + 1.5, Height = eyeSz + 1.5, Fill = Brushes.White };
+                Canvas.SetLeft(lw, cx - eyeGap - (eyeSz + 1.5) / 2);
+                Canvas.SetTop(lw, eyeY - 0.5);
+                pixelCanvasSlime.Children.Add(lw);
+                var rw = new Ellipse { Width = eyeSz + 1.5, Height = eyeSz + 1.5, Fill = Brushes.White };
+                Canvas.SetLeft(rw, cx + eyeGap - (eyeSz + 1.5) / 2);
+                Canvas.SetTop(rw, eyeY - 0.5);
+                pixelCanvasSlime.Children.Add(rw);
+            }
+            var le = new Ellipse { Width = eyeSz, Height = eyeSz, Fill = Brushes.Black };
+            Canvas.SetLeft(le, cx - eyeGap - eyeSz / 2);
+            Canvas.SetTop(le, eyeY);
+            pixelCanvasSlime.Children.Add(le);
+            var re = new Ellipse { Width = eyeSz, Height = eyeSz, Fill = Brushes.Black };
+            Canvas.SetLeft(re, cx + eyeGap - eyeSz / 2);
+            Canvas.SetTop(re, eyeY);
+            pixelCanvasSlime.Children.Add(re);
+
+            // 口の表情
+            double mouthY = eyeY + eyeSz + 2;
+            if (mood == "sad")
+            {
+                // 逆ハの字 (しょんぼり)
+                var ml = new Rectangle { Width = 3, Height = 1, Fill = Brushes.Black,
+                    RenderTransformOrigin = new Point(0.5, 0.5) };
+                ml.RenderTransform = new RotateTransform(-25);
+                Canvas.SetLeft(ml, cx - 4); Canvas.SetTop(ml, mouthY + 1);
+                pixelCanvasSlime.Children.Add(ml);
+                var mr = new Rectangle { Width = 3, Height = 1, Fill = Brushes.Black,
+                    RenderTransformOrigin = new Point(0.5, 0.5) };
+                mr.RenderTransform = new RotateTransform(25);
+                Canvas.SetLeft(mr, cx + 1); Canvas.SetTop(mr, mouthY + 1);
+                pixelCanvasSlime.Children.Add(mr);
+            }
+            else if (stage >= 1 || mood == "happy" || mood == "jackpot")
+            {
+                // ハの字 (笑顔)
+                var ml = new Rectangle { Width = 3, Height = 1, Fill = Brushes.Black,
+                    RenderTransformOrigin = new Point(0.5, 0.5) };
+                ml.RenderTransform = new RotateTransform(25);
+                Canvas.SetLeft(ml, cx - 4); Canvas.SetTop(ml, mouthY);
+                pixelCanvasSlime.Children.Add(ml);
+                var mr = new Rectangle { Width = 3, Height = 1, Fill = Brushes.Black,
+                    RenderTransformOrigin = new Point(0.5, 0.5) };
+                mr.RenderTransform = new RotateTransform(-25);
+                Canvas.SetLeft(mr, cx + 1); Canvas.SetTop(mr, mouthY);
+                pixelCanvasSlime.Children.Add(mr);
+            }
+
+            // ほっぺ（ステージ2以上）
+            if (stage >= 2)
+            {
+                var blush = Color.FromArgb(100, 255, 100, 100);
+                var bl = new Ellipse { Width = 3.5, Height = 2.5, Fill = new SolidColorBrush(blush) };
+                Canvas.SetLeft(bl, cx - eyeGap - 3.5);
+                Canvas.SetTop(bl, eyeY + eyeSz + 0.5);
+                pixelCanvasSlime.Children.Add(bl);
+                var br = new Ellipse { Width = 3.5, Height = 2.5, Fill = new SolidColorBrush(blush) };
+                Canvas.SetLeft(br, cx + eyeGap);
+                Canvas.SetTop(br, eyeY + eyeSz + 0.5);
+                pixelCanvasSlime.Children.Add(br);
+            }
+
+            // キングスライム（ステージ4）: 宝石のアクセント
+            if (stage >= 4)
+            {
+                var gem = new Ellipse { Width = 4, Height = 4,
+                    Fill = new SolidColorBrush(Colors.DeepSkyBlue) };
+                Canvas.SetLeft(gem, cx - 2);
+                Canvas.SetTop(gem, bodyTop - bumpH * 0.6 - 2);
+                pixelCanvasSlime.Children.Add(gem);
+            }
+
+            // ハイライト（ツヤ感）
+            var shine = new Ellipse { Width = 2.5, Height = 2,
+                Fill = new SolidColorBrush(Color.FromArgb(160, 255, 255, 255)) };
+            Canvas.SetLeft(shine, cx - bumpW * 0.18);
+            Canvas.SetTop(shine, bodyTop - bumpH * 0.5);
+            pixelCanvasSlime.Children.Add(shine);
+
+            // ウィグルアニメーション
+            AnimateSlimeWobble();
+        }
+
+        private void AnimateSlimeWobble()
+        {
+            try
+            {
+                if (pixelCanvasSlime?.Children.Count == 0) return;
+                var st = new ScaleTransform(1, 1);
+                pixelCanvasSlime.RenderTransform = st;
+                pixelCanvasSlime.RenderTransformOrigin = new Point(0.5, 1.0);
+                var keyY = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(450) };
+                keyY.KeyFrames.Add(new LinearDoubleKeyFrame(1.0,  TimeSpan.Zero));
+                keyY.KeyFrames.Add(new LinearDoubleKeyFrame(1.25, TimeSpan.FromMilliseconds(100)));
+                keyY.KeyFrames.Add(new LinearDoubleKeyFrame(0.85, TimeSpan.FromMilliseconds(200)));
+                keyY.KeyFrames.Add(new LinearDoubleKeyFrame(1.1,  TimeSpan.FromMilliseconds(320)));
+                keyY.KeyFrames.Add(new LinearDoubleKeyFrame(1.0,  TimeSpan.FromMilliseconds(450)));
+                var keyX = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(450) };
+                keyX.KeyFrames.Add(new LinearDoubleKeyFrame(1.0,  TimeSpan.Zero));
+                keyX.KeyFrames.Add(new LinearDoubleKeyFrame(0.82, TimeSpan.FromMilliseconds(100)));
+                keyX.KeyFrames.Add(new LinearDoubleKeyFrame(1.15, TimeSpan.FromMilliseconds(200)));
+                keyX.KeyFrames.Add(new LinearDoubleKeyFrame(0.95, TimeSpan.FromMilliseconds(320)));
+                keyX.KeyFrames.Add(new LinearDoubleKeyFrame(1.0,  TimeSpan.FromMilliseconds(450)));
+                st.BeginAnimation(ScaleTransform.ScaleYProperty, keyY);
+                st.BeginAnimation(ScaleTransform.ScaleXProperty, keyX);
+            }
+            catch { }
+        }
+
+        private void SetSlimeMoodTimer(int ms)
+        {
+            _slimeMoodTimer?.Stop();
+            _slimeMoodTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
+            _slimeMoodTimer.Tick += (s, e) =>
+            {
+                _slimeMood = "neutral";
+                _slimeMoodTimer.Stop();
+                UpdateSlimeDisplay();
+            };
+            _slimeMoodTimer.Start();
+        }
+
+        private void StartSlimeIdleAnimation()
+        {
+            _slimeIdleTimer?.Stop();
+            _slimeIdleTimer = new DispatcherTimer
+                { Interval = TimeSpan.FromMilliseconds(_random.Next(3000, 6000)) };
+            _slimeIdleTimer.Tick += (s, e) =>
+            {
+                _slimeIdleTimer.Stop();
+                AnimateSlimeWobble();
+                _slimeIdleTimer.Interval = TimeSpan.FromMilliseconds(_random.Next(3000, 6000));
+                _slimeIdleTimer.Start();
+            };
+            _slimeIdleTimer.Start();
         }
 
         private void GenerateParticles()
@@ -660,8 +977,8 @@ namespace snippy
             
             EffectCanvas.Children.Clear();
             
-            // Number of particles depends on plant level
-            int particleCount = Math.Min(_plantLevel * 3, 50);
+            // Number of particles depends on slime level
+            int particleCount = Math.Min(_slimeLevel * 3, 50);
             
             for (int i = 0; i < particleCount; i++)
             {
@@ -726,7 +1043,13 @@ namespace snippy
                     ScreenGridColor = _screenGridColor,
                     TvOuterRadius = _tvOuterRadius,
                     TvInnerRadius = _tvInnerRadius,
-                    TotalSpins = _totalSpinsCounter
+                    TotalSpins = _totalSpinsCounter,
+                    SlimeLevel = _slimeLevel,
+                    ComboStreak = _comboStreak,
+                    OwnedRelics = _ownedRelics,
+                    TotalWinCount = _totalWinCount,
+                    SkillGuardActive = _skillGuardActive,
+                    SkillSurgeActive = _skillSurgeActive,
                 };
 
                 string json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
@@ -754,8 +1077,13 @@ namespace snippy
                         _screenGridColor = data.ScreenGridColor;
                         _tvOuterRadius = data.TvOuterRadius;
                         _tvInnerRadius = data.TvInnerRadius;
-                        _plantLevel = data.PlantLevel;
+                        _slimeLevel = data.SlimeLevel;
                         _totalSpinsCounter = data.TotalSpins;
+                        _comboStreak = data.ComboStreak;
+                        _ownedRelics = data.OwnedRelics ?? new List<string>();
+                        _totalWinCount = data.TotalWinCount;
+                        _skillGuardActive = data.SkillGuardActive;
+                        _skillSurgeActive = data.SkillSurgeActive;
                         
                         Todos.Clear(); // 起動時にTodoリストをクリア
                         foreach (var noteData in data.Notes)
@@ -1354,7 +1682,224 @@ namespace snippy
         private void UpdatePointsDisplay()
         {
             if (pixelCanvasPoints != null)
-                DrawPixelText(pixelCanvasPoints, $"{_points}", 1, new SolidColorBrush(Color.FromArgb(255, 255, 166, 64))); // #FFFFA640
+                DrawPixelText(pixelCanvasPoints, $"{_points}", 1, new SolidColorBrush(Color.FromArgb(255, 255, 166, 64)));
+        }
+
+        // ─── Roguelike: コンボ ────────────────────────────────
+        private double GetComboMultiplier() => _comboStreak switch
+        {
+            1 => 1.2,  2 => 1.5,  3 => 2.0,  >= 4 => 3.0,  _ => 1.0
+        };
+
+        private void UpdateComboDisplay()
+        {
+            if (pixelCanvasCombo == null) return;
+            if (_comboStreak > 0)
+            {
+                Color c = _comboStreak >= 4
+                    ? Color.FromArgb(255, 255, 80, 255)
+                    : Color.FromArgb(255, 255, 160, 40);
+                DrawPixelText(pixelCanvasCombo, $"C:{_comboStreak}", 1, new SolidColorBrush(c));
+                if (pixelCanvasCombo.Effect is DropShadowEffect sh) sh.Color = c;
+                pixelCanvasCombo.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                pixelCanvasCombo.Children.Clear();
+                pixelCanvasCombo.Visibility = Visibility.Hidden;
+            }
+        }
+
+        // ─── Roguelike: スキル ────────────────────────────────
+        private void UpdateSkillDisplay()
+        {
+            if (pixelCanvasSkill == null) return;
+            pixelCanvasSkill.Children.Clear();
+            if (_skillGuardActive || _skillSurgeActive)
+            {
+                string text = (_skillGuardActive && _skillSurgeActive) ? "GS"
+                            : _skillGuardActive ? "G" : "S";
+                Color c = (_skillGuardActive && _skillSurgeActive)
+                    ? Color.FromArgb(255, 200, 230, 255)
+                    : _skillGuardActive
+                    ? Color.FromArgb(255, 100, 200, 255)
+                    : Color.FromArgb(255, 255, 210, 50);
+                DrawPixelText(pixelCanvasSkill, text, 1, new SolidColorBrush(c));
+                pixelCanvasSkill.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                pixelCanvasSkill.Visibility = Visibility.Hidden;
+            }
+        }
+
+        private void SetupSkillContextMenu()
+        {
+            var menu = new ContextMenu();
+
+            var guardItem = new MenuItem { Header = "🛡 守護盾 — 次スピン無料 (30pt)" };
+            guardItem.Click += (s, e) =>
+            {
+                if (_skillGuardActive) { ShowEventNotification("守護盾はすでにアクティブ"); return; }
+                if (_points >= 30) { _points -= 30; _skillGuardActive = true;
+                    UpdatePointsDisplay(); UpdateSkillDisplay();
+                    ShowEventNotification("🛡 守護盾 発動！\n次のスピンは無料！"); SaveData(); }
+                else ShowEventNotification($"ポイント不足\n(30pt必要)");
+            };
+
+            var surgeItem = new MenuItem { Header = "⚡ 倍増 — 次の勝利2倍 (20pt)" };
+            surgeItem.Click += (s, e) =>
+            {
+                if (_skillSurgeActive) { ShowEventNotification("倍増はすでにアクティブ"); return; }
+                if (_points >= 20) { _points -= 20; _skillSurgeActive = true;
+                    UpdatePointsDisplay(); UpdateSkillDisplay();
+                    ShowEventNotification("⚡ 倍増 発動！\n次の勝利が2倍に！"); SaveData(); }
+                else ShowEventNotification($"ポイント不足\n(20pt必要)");
+            };
+
+            var relicItem = new MenuItem { Header = "📿 所持レリック一覧" };
+            relicItem.Click += (s, e) =>
+            {
+                if (_ownedRelics.Count == 0)
+                    ShowEventNotification("レリック未取得\n(5勝ごとに1個獲得)");
+                else
+                    ShowEventNotification(string.Join("\n",
+                        _ownedRelics.Select(r => GetRelicDisplayName(r))));
+            };
+
+            var statusItem = new MenuItem { Header = "📊 ステータス確認" };
+            statusItem.Click += (s, e) =>
+            {
+                int ceiling = _ownedRelics.Contains("DIVINE_FAVOR") ? 75 : 100;
+                int toNext = ceiling - (_totalSpinsCounter % ceiling);
+                ShowEventNotification(
+                    $"総スピン: {_totalSpinsCounter}\n" +
+                    $"総勝利: {_totalWinCount}\n" +
+                    $"天井まで: {toNext}回\n" +
+                    $"コンボ: {_comboStreak}");
+            };
+
+            menu.Items.Add(guardItem);
+            menu.Items.Add(surgeItem);
+            menu.Items.Add(new Separator());
+            menu.Items.Add(relicItem);
+            menu.Items.Add(statusItem);
+            ScreenGrid.ContextMenu = menu;
+        }
+
+        // ─── Roguelike: レリック ──────────────────────────────
+        private void UpdateRelicDisplay()
+        {
+            if (pixelCanvasRelics == null) return;
+            pixelCanvasRelics.Children.Clear();
+            var colors = new Dictionary<string, Color>
+            {
+                {"GOLDEN_FINGER",  Colors.Gold},
+                {"LUCKY_CHARM",    Colors.MediumPurple},
+                {"THRIFTY_WALLET", Colors.SteelBlue},
+                {"DIVINE_FAVOR",   Colors.Orange},
+                {"CHAIN_PROOF",    Colors.Crimson},
+                {"MAGIC_DICE",     Colors.Cyan},
+                {"DOUBLE_UP",      Colors.LimeGreen},
+                {"PITY_GUARD",     Colors.HotPink},
+            };
+            int x = 0;
+            foreach (var relic in _ownedRelics)
+            {
+                if (!colors.TryGetValue(relic, out Color c)) continue;
+                var dot = new Rectangle { Width = 5, Height = 5,
+                    Fill = new SolidColorBrush(c),
+                    ToolTip = GetRelicDisplayName(relic) };
+                Canvas.SetLeft(dot, x); Canvas.SetTop(dot, 0);
+                pixelCanvasRelics.Children.Add(dot);
+                x += 7;
+            }
+        }
+
+        private string GetRelicDisplayName(string relic) => relic switch
+        {
+            "GOLDEN_FINGER"  => "🌟 黄金の指: 勝利ボーナス+50%",
+            "LUCKY_CHARM"    => "🍀 幸運のお守り: ラッキー確率+10%",
+            "THRIFTY_WALLET" => "💰 倹約家の財布: コスト-2pt",
+            "DIVINE_FAVOR"   => "✨ 天運の加護: 天井75回",
+            "CHAIN_PROOF"    => "🔗 連鎖の証: コンボ倍率+50%",
+            "MAGIC_DICE"     => "🎲 魔法のサイコロ: 10%無料スピン",
+            "DOUBLE_UP"      => "⬆ ダブルアップ: 15%でボーナス2倍",
+            "PITY_GUARD"     => "🛡 加護の盾: 0pt時に15pt復活",
+            _ => relic
+        };
+
+        private void GrantRandomRelic()
+        {
+            string[] avail = ALL_RELICS.Where(r => !_ownedRelics.Contains(r)).ToArray();
+            if (avail.Length == 0)
+            {
+                ShowEventNotification("✦ 全レリック取得済み！\nさすが！");
+                return;
+            }
+            string newRelic = avail[_random.Next(avail.Length)];
+            _ownedRelics.Add(newRelic);
+            UpdateRelicDisplay();
+            PlayRelicGetAnimation(newRelic);
+            SaveData();
+        }
+
+        private void PlayRelicGetAnimation(string relic)
+        {
+            try
+            {
+                var flashAnim = (Storyboard)this.Resources["FlashAnim"];
+                if (flashAnim != null && FlashOverlay != null)
+                {
+                    FlashOverlay.Fill = Brushes.Gold;
+                    flashAnim.Begin();
+                    var reset = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                    reset.Tick += (s, e) => { FlashOverlay.Fill = Brushes.White; reset.Stop(); };
+                    reset.Start();
+                }
+                var shakeAnim = (Storyboard)this.Resources["ShakeAnim"];
+                shakeAnim?.Begin();
+                ShowEventNotification($"★ レリック獲得！\n{GetRelicDisplayName(relic)}");
+            }
+            catch { }
+        }
+
+        // ─── イベント通知 ─────────────────────────────────────
+        private void ShowEventNotification(string message)
+        {
+            try
+            {
+                if (OverlayCanvas == null) return;
+                var panel = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(210, 20, 10, 40)),
+                    BorderBrush = new SolidColorBrush(Colors.Gold),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(7, 4, 7, 4),
+                    IsHitTestVisible = false
+                };
+                var text = new TextBlock
+                {
+                    Text = message,
+                    Foreground = new SolidColorBrush(Colors.Gold),
+                    FontFamily = new FontFamily("Comic Sans MS"),
+                    FontSize = 9,
+                    TextAlignment = TextAlignment.Center,
+                    IsHitTestVisible = false
+                };
+                panel.Child = text;
+                Canvas.SetLeft(panel, 95);
+                Canvas.SetTop(panel, 70);
+                OverlayCanvas.Children.Add(panel);
+                var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                panel.BeginAnimation(Canvas.TopProperty,
+                    new DoubleAnimation(70, 45, TimeSpan.FromMilliseconds(2500)) { EasingFunction = ease });
+                var opAnim = new DoubleAnimation(1.0, 0.0, TimeSpan.FromMilliseconds(2500));
+                opAnim.Completed += (s, e) => OverlayCanvas.Children.Remove(panel);
+                panel.BeginAnimation(UIElement.OpacityProperty, opAnim);
+            }
+            catch { }
         }
 
         private void StartTodoButtonPulse()
@@ -1486,8 +2031,13 @@ namespace snippy
         public string ScreenGridColor { get; set; } = "#FF0D3A20";
         public double TvOuterRadius { get; set; } = 8.0;
         public double TvInnerRadius { get; set; } = 8.0;
-        public int PlantLevel { get; set; } = 0;
+        public int SlimeLevel { get; set; } = 0;
         public int TotalSpins { get; set; } = 0;
+        public int ComboStreak { get; set; } = 0;
+        public List<string> OwnedRelics { get; set; } = new List<string>();
+        public int TotalWinCount { get; set; } = 0;
+        public bool SkillGuardActive { get; set; } = false;
+        public bool SkillSurgeActive { get; set; } = false;
     }
 
     public class SavedNote
