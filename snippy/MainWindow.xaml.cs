@@ -124,7 +124,8 @@ namespace snippy
                 UpdateSlotDisplay(); // Initial ラックチェック state
                 UpdateLuckyDisplay(); // Initial lucky counter
                 ApplyCustomizations(); // Apply loaded look
-                // ApplyPlantLevelChanges(); // Apply plant and effects on load (Temporarily disabled)
+                ApplyPlantLevelChanges(); // Apply plant and effects on load
+                StartTodoButtonPulse(); // Pulsing todo button
             };
         }
 
@@ -309,6 +310,7 @@ namespace snippy
             UpdateLuckyDisplay();
 
             _plantLevel++;
+            ApplyPlantLevelChanges();
 
             if (isWin && _finalDigit1 == 7)
                 PlayJackpotAnimation();
@@ -591,10 +593,8 @@ namespace snippy
 
         private void ApplyPlantLevelChanges()
         {
-            /* Temporarily Disabled
             UpdatePlantDisplay();
             GenerateParticles();
-            */
         }
 
         private void UpdatePlantDisplay()
@@ -673,8 +673,10 @@ namespace snippy
                     Opacity = _random.NextDouble()
                 };
 
-                Canvas.SetLeft(particle, _random.Next(0, (int)EffectCanvas.Width));
-                Canvas.SetTop(particle, _random.Next(0, (int)EffectCanvas.Height));
+                int canvasW = (int)(EffectCanvas.ActualWidth > 0 ? EffectCanvas.ActualWidth : 140);
+                int canvasH = (int)(EffectCanvas.ActualHeight > 0 ? EffectCanvas.ActualHeight : 120);
+                Canvas.SetLeft(particle, _random.Next(0, canvasW));
+                Canvas.SetTop(particle, _random.Next(0, canvasH));
                 
                 EffectCanvas.Children.Add(particle);
 
@@ -782,6 +784,9 @@ namespace snippy
 
             if (pixelCanvasTime != null) DrawPixelText(pixelCanvasTime, timeStr, 2, new SolidColorBrush(Color.FromArgb(255, 74, 255, 112))); // #FF4AFF70
             if (pixelCanvasDate != null) DrawPixelText(pixelCanvasDate, dateStr, 1, new SolidColorBrush(Color.FromArgb(255, 74, 255, 112)));
+
+            if (now.Second == 0 && !_isSpinningSlot)
+                PlayMinuteChimeAnimation();
         }
 
         private void DrawPixelText(Canvas canvas, string text, int pixelSize, SolidColorBrush brush)
@@ -908,12 +913,15 @@ namespace snippy
             
             var completeMenuItem = new MenuItem { Header = "達成 (Complete)" };
             completeMenuItem.Click += (s, e) => {
+                double noteX = Canvas.GetLeft(note) + 30;
+                double noteY = Canvas.GetTop(note) + 30;
                 StickyNoteCanvas.Children.Remove(note);
                 RemoveTodoFromList(text);
                 AddPoints(10);
+                PlayConfettiAnimation(noteX, noteY);
                 SaveData();
             };
-            
+
             var deleteMenuItem = new MenuItem { Header = "削除 (Delete)" };
             deleteMenuItem.Click += (s, e) => {
                 StickyNoteCanvas.Children.Remove(note);
@@ -998,23 +1006,45 @@ namespace snippy
             // If we couldn't find a totally clear spot after 50 attempts, 
             // just use the last generated position (it will overlap, but screen is full)
 
+            var rotateTransform = new RotateTransform(angle);
+            var popScale = new ScaleTransform(0, 0);
             var transform = new TransformGroup();
-            transform.Children.Add(new RotateTransform(angle));
+            transform.Children.Add(rotateTransform);
+            transform.Children.Add(popScale);
             note.RenderTransform = transform;
             note.RenderTransformOrigin = new Point(0.5, 0.5);
 
             Canvas.SetLeft(note, x);
             Canvas.SetTop(note, y);
-            
+
             // Re-enable hit test so user can click/right-click it
             note.IsHitTestVisible = true;
-            
+
             // Register Drag and Drop events
             note.MouseLeftButtonDown += StickyNote_MouseLeftButtonDown;
             note.MouseMove += StickyNote_MouseMove;
             note.MouseLeftButtonUp += StickyNote_MouseLeftButtonUp;
-            
+
+            // Wiggle on hover
+            note.MouseEnter += (s, e) =>
+            {
+                if (!_isDraggingNote)
+                {
+                    var wiggle = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(300) };
+                    wiggle.KeyFrames.Add(new LinearDoubleKeyFrame(angle + 6, TimeSpan.FromMilliseconds(75)));
+                    wiggle.KeyFrames.Add(new LinearDoubleKeyFrame(angle - 6, TimeSpan.FromMilliseconds(150)));
+                    wiggle.KeyFrames.Add(new LinearDoubleKeyFrame(angle + 3, TimeSpan.FromMilliseconds(225)));
+                    wiggle.KeyFrames.Add(new LinearDoubleKeyFrame(angle, TimeSpan.FromMilliseconds(300)));
+                    rotateTransform.BeginAnimation(RotateTransform.AngleProperty, wiggle);
+                }
+            };
+
             StickyNoteCanvas.Children.Add(note);
+
+            // Pop-in animation
+            var easeFn = new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 2, Springiness = 5 };
+            popScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(450)) { EasingFunction = easeFn });
+            popScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(450)) { EasingFunction = easeFn });
         }
 
         private void RestoreStickyNote(SavedNote noteData)
@@ -1052,12 +1082,15 @@ namespace snippy
             
             var completeMenuItem = new MenuItem { Header = "達成 (Complete)" };
             completeMenuItem.Click += (s, e) => {
+                double noteX = Canvas.GetLeft(note) + 30;
+                double noteY = Canvas.GetTop(note) + 30;
                 StickyNoteCanvas.Children.Remove(note);
                 RemoveTodoFromList(noteData.Text);
                 AddPoints(10);
+                PlayConfettiAnimation(noteX, noteY);
                 SaveData();
             };
-            
+
             var deleteMenuItem = new MenuItem { Header = "削除 (Delete)" };
             deleteMenuItem.Click += (s, e) => {
                 StickyNoteCanvas.Children.Remove(note);
@@ -1078,22 +1111,38 @@ namespace snippy
                 Opacity = 0.5
             };
 
+            var restoredRotate = new RotateTransform(noteData.Angle);
             var transform = new TransformGroup();
-            transform.Children.Add(new RotateTransform(noteData.Angle));
+            transform.Children.Add(restoredRotate);
             note.RenderTransform = transform;
             note.RenderTransformOrigin = new Point(0.5, 0.5);
 
             Canvas.SetLeft(note, noteData.X);
             Canvas.SetTop(note, noteData.Y);
-            
+
             // Re-enable hit test so user can click/right-click it
             note.IsHitTestVisible = true;
-            
+
             // Register Drag and Drop events
             note.MouseLeftButtonDown += StickyNote_MouseLeftButtonDown;
             note.MouseMove += StickyNote_MouseMove;
             note.MouseLeftButtonUp += StickyNote_MouseLeftButtonUp;
-            
+
+            // Wiggle on hover
+            double savedAngle = noteData.Angle;
+            note.MouseEnter += (s, e) =>
+            {
+                if (!_isDraggingNote)
+                {
+                    var wiggle = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(300) };
+                    wiggle.KeyFrames.Add(new LinearDoubleKeyFrame(savedAngle + 6, TimeSpan.FromMilliseconds(75)));
+                    wiggle.KeyFrames.Add(new LinearDoubleKeyFrame(savedAngle - 6, TimeSpan.FromMilliseconds(150)));
+                    wiggle.KeyFrames.Add(new LinearDoubleKeyFrame(savedAngle + 3, TimeSpan.FromMilliseconds(225)));
+                    wiggle.KeyFrames.Add(new LinearDoubleKeyFrame(savedAngle, TimeSpan.FromMilliseconds(300)));
+                    restoredRotate.BeginAnimation(RotateTransform.AngleProperty, wiggle);
+                }
+            };
+
             StickyNoteCanvas.Children.Add(note);
         }
 
@@ -1252,6 +1301,7 @@ namespace snippy
         {
             // Add points when checked
             AddPoints(10);
+            PlayConfettiAnimation(185, 230);
             
             var cb = sender as CheckBox;
             if (cb != null && cb.DataContext is TodoItem item)
@@ -1284,25 +1334,141 @@ namespace snippy
         {
             _points += points;
             UpdatePointsDisplay();
-            
-            // Optional: small animation on time to indicate point gain
+
+            // Small animation on time to indicate point gain
             if (pixelCanvasTime != null)
             {
                 var st = new ScaleTransform(1, 1);
                 pixelCanvasTime.RenderTransform = st;
                 pixelCanvasTime.RenderTransformOrigin = new Point(0.5, 0.5);
-                
+
                 var animX = new DoubleAnimation(1, 1.1, TimeSpan.FromMilliseconds(100)) { AutoReverse = true };
                 var animY = new DoubleAnimation(1, 1.1, TimeSpan.FromMilliseconds(100)) { AutoReverse = true };
                 st.BeginAnimation(ScaleTransform.ScaleXProperty, animX);
                 st.BeginAnimation(ScaleTransform.ScaleYProperty, animY);
             }
+
+            ShowFloatingPoints(points);
         }
 
         private void UpdatePointsDisplay()
         {
-            if (pixelCanvasPoints != null) 
+            if (pixelCanvasPoints != null)
                 DrawPixelText(pixelCanvasPoints, $"{_points}", 1, new SolidColorBrush(Color.FromArgb(255, 255, 166, 64))); // #FFFFA640
+        }
+
+        private void StartTodoButtonPulse()
+        {
+            try
+            {
+                var st = new ScaleTransform(1, 1);
+                btnToggleTodo.RenderTransform = st;
+                btnToggleTodo.RenderTransformOrigin = new Point(0.5, 0.5);
+                var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
+                var sx = new DoubleAnimation(1.0, 1.25, TimeSpan.FromMilliseconds(850))
+                    { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease };
+                var sy = new DoubleAnimation(1.0, 1.25, TimeSpan.FromMilliseconds(850))
+                    { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease };
+                st.BeginAnimation(ScaleTransform.ScaleXProperty, sx);
+                st.BeginAnimation(ScaleTransform.ScaleYProperty, sy);
+            }
+            catch { }
+        }
+
+        private void PlayMinuteChimeAnimation()
+        {
+            try
+            {
+                var flashAnim = (Storyboard)this.Resources["FlashAnim"];
+                if (flashAnim != null && FlashOverlay != null)
+                {
+                    FlashOverlay.Fill = new SolidColorBrush(Color.FromArgb(100, 74, 255, 112));
+                    flashAnim.Begin();
+                    var reset = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                    reset.Tick += (s, e) => { FlashOverlay.Fill = Brushes.White; reset.Stop(); };
+                    reset.Start();
+                }
+            }
+            catch { }
+        }
+
+        private void PlayConfettiAnimation(double originX = 185, double originY = 175)
+        {
+            try
+            {
+                if (OverlayCanvas == null) return;
+                var confettiColors = new[]
+                {
+                    Colors.Gold, Colors.HotPink, Colors.Cyan, Colors.LimeGreen,
+                    Colors.Orange, Colors.Violet, Colors.DeepSkyBlue, Colors.Yellow
+                };
+
+                for (int i = 0; i < 28; i++)
+                {
+                    UIElement shape = _random.Next(2) == 0
+                        ? (UIElement)new Rectangle
+                            {
+                                Width = _random.Next(4, 10), Height = _random.Next(4, 10),
+                                Fill = new SolidColorBrush(confettiColors[_random.Next(confettiColors.Length)])
+                            }
+                        : (UIElement)new Ellipse
+                            {
+                                Width = _random.Next(4, 9), Height = _random.Next(4, 9),
+                                Fill = new SolidColorBrush(confettiColors[_random.Next(confettiColors.Length)])
+                            };
+
+                    double tx = originX + _random.Next(-90, 90);
+                    double ty = originY - _random.Next(20, 130);
+
+                    Canvas.SetLeft(shape, originX);
+                    Canvas.SetTop(shape, originY);
+                    OverlayCanvas.Children.Add(shape);
+
+                    var dur = TimeSpan.FromMilliseconds(_random.Next(600, 1300));
+                    var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                    shape.BeginAnimation(Canvas.LeftProperty, new DoubleAnimation(originX, tx, dur) { EasingFunction = ease });
+                    shape.BeginAnimation(Canvas.TopProperty, new DoubleAnimation(originY, ty, dur) { EasingFunction = ease });
+
+                    var opAnim = new DoubleAnimation(1.0, 0.0, dur);
+                    var capturedShape = shape;
+                    opAnim.Completed += (s, e) => OverlayCanvas.Children.Remove(capturedShape);
+                    shape.BeginAnimation(UIElement.OpacityProperty, opAnim);
+                }
+            }
+            catch { }
+        }
+
+        private void ShowFloatingPoints(int points)
+        {
+            try
+            {
+                if (OverlayCanvas == null) return;
+                double startX = 240;
+                double startY = 225;
+
+                var label = new TextBlock
+                {
+                    Text = $"+{points}",
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 215, 0)),
+                    FontFamily = new FontFamily("Comic Sans MS"),
+                    FontSize = 14,
+                    FontWeight = FontWeights.Bold,
+                    IsHitTestVisible = false
+                };
+
+                Canvas.SetLeft(label, startX);
+                Canvas.SetTop(label, startY);
+                OverlayCanvas.Children.Add(label);
+
+                var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                label.BeginAnimation(Canvas.TopProperty,
+                    new DoubleAnimation(startY, startY - 55, TimeSpan.FromMilliseconds(1200)) { EasingFunction = ease });
+
+                var opAnim = new DoubleAnimation(1.0, 0.0, TimeSpan.FromMilliseconds(1200));
+                opAnim.Completed += (s, e) => OverlayCanvas.Children.Remove(label);
+                label.BeginAnimation(UIElement.OpacityProperty, opAnim);
+            }
+            catch { }
         }
     }
 
